@@ -1,0 +1,170 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SiteType {
+  product
+  article
+}
+
+enum SiteStatus {
+  live
+  draft
+  archived
+}
+
+enum LogType {
+  info
+  success
+  warning
+  error
+}
+
+enum ImportStatus {
+  processing
+  completed
+  failed
+}
+
+enum ImportType {
+  xml
+  json
+}
+
+model ImportBatch {
+  id            String       @id @default(uuid())
+  name          String
+  type          ImportType
+  status        ImportStatus @default(processing)
+  productsCount Int          @default(0)
+  targetSiteIds String[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@map("import_batches")
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  type      LogType
+  message   String
+  timestamp DateTime @default(now())
+
+  @@map("logs")
+}
+
+model Site {
+  id        String     @id @default(uuid())
+  name      String
+  domain    String     @unique
+  type      SiteType
+  status    SiteStatus @default(live)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  articles ArticleSite[]
+  products ProductSite[]
+}
+
+model Article {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sites ArticleSite[]
+}
+
+model ArticleSite {
+  id        String   @id @default(uuid())
+  articleId String
+  siteId    String
+  createdAt DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, siteId])
+}
+
+model Product {
+  id         String    @id @default(uuid())
+  name       String
+  subtitle   String?
+  standard   String?
+  length     String?
+  weight     String?
+  price      String
+  priceUnit  String
+  image      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  externalId String?   @unique
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  quantity   Int       @default(0)
+
+  sites      ProductSite[]
+  orderItems OrderItem[]
+}
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  parentId  String?
+  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryHierarchy")
+  products  Product[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+enum OrderStatus {
+  NEW
+  PROCESSED
+  CANCELLED
+}
+
+model Order {
+  id         String      @id @default(cuid())
+  email      String
+  comment    String?
+  status     OrderStatus @default(NEW)
+  totalPrice String
+  currency   String      @default("RUB")
+  items      OrderItem[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity  Int
+  price     String
+  name      String
+}
+
+model ProductSite {
+  id          String   @id @default(uuid())
+  productId   String
+  siteId      String
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, siteId])
+}
