@@ -91,19 +91,10 @@ export class CategoriesService {
       throw new NotFoundException(`Сайт с доменом ${domain} не найден`);
     }
 
-    const categories = await this.prisma.category.findMany({
-      where: {
-        products: {
-          some: {
-            sites: {
-              some: {
-                siteId: site.id,
-                isPublished: true,
-              },
-            },
-          },
-        },
-      },
+    // 1. Загружаем ВСЕ категории и считаем количество товаров для каждой.
+    // Это гарантирует, что мы не потеряем пустые корневые категории,
+    // у которых товары есть только у детей.
+    const allCategories = await this.prisma.category.findMany({
       include: {
         _count: {
           select: {
@@ -119,56 +110,81 @@ export class CategoriesService {
             },
           },
         },
-        children: {
-          where: {
-            products: {
-              some: {
-                sites: {
-                  some: {
-                    siteId: site.id,
-                    isPublished: true,
-                  },
-                },
-              },
-            },
-          },
-          include: {
-            _count: {
-              select: {
-                products: {
-                  where: {
-                    sites: {
-                      some: {
-                        siteId: site.id,
-                        isPublished: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          orderBy: { name: 'asc' },
-        },
       },
       orderBy: { name: 'asc' },
     });
 
-    const categoryIds = new Set(categories.map((c) => c.id));
+    // Вспомогательный интерфейс для построения дерева
+    interface CategoryNode {
+      id: string;
+      name: string;
+      parentId: string | null;
+      productsCount: number;
+      totalProducts: number; // Свои товары + товары всех потомков
+      children: CategoryNode[];
+    }
 
-    return categories
-      .filter((cat) => !cat.parentId || !categoryIds.has(cat.parentId))
-      .map((cat) =>
-        fillDto(CategoryRdo, {
-          ...cat,
-          productsCount: cat._count.products,
-          children: cat.children.map((child) => ({
-            id: child.id,
-            name: child.name,
-            productsCount: child._count.products,
-          })),
-        }),
-      );
+    const map = new Map<string, CategoryNode>();
+
+    // 2. Инициализируем узлы дерева
+    allCategories.forEach((cat) => {
+      map.set(cat.id, {
+        id: cat.id,
+        name: cat.name,
+        parentId: cat.parentId,
+        productsCount: cat._count.products,
+        totalProducts: cat._count.products,
+        children: [],
+      });
+    });
+
+    // 3. Связываем детей с родителями
+    allCategories.forEach((cat) => {
+      const node = map.get(cat.id)!;
+      if (cat.parentId && map.has(cat.parentId)) {
+        const parent = map.get(cat.parentId)!;
+        parent.children.push(node);
+      }
+    });
+
+    // 4. Собираем корневые узлы (у которых нет parentId или родитель отсутствует)
+    const roots: CategoryNode[] = [];
+    allCategories.forEach((cat) => {
+      if (!cat.parentId || !map.has(cat.parentId)) {
+        roots.push(map.get(cat.id)!);
+      }
+    });
+
+    // 5. Рекурсивно вычисляем totalProducts снизу вверх
+    const calculateTotals = (nodes: CategoryNode[]) => {
+      nodes.forEach((node) => {
+        calculateTotals(node.children); // Сначала считаем для детей
+        const childrenTotal = node.children.reduce(
+          (sum, child) => sum + child.totalProducts,
+          0,
+        );
+        node.totalProducts += childrenTotal; // Добавляем товары детей к своим
+      });
+    };
+
+    calculateTotals(roots);
+
+    // 6. Фильтруем пустые ветки и формируем DTO рекурсивно
+    const filterAndMap = (nodes: CategoryNode[]): CategoryRdo[] => {
+      return nodes
+        .filter((node) => node.totalProducts > 0) // Оставляем только ветки, где есть товары
+        .map((node) => {
+          return fillDto(CategoryRdo, {
+            id: node.id,
+            name: node.name,
+            parentId: node.parentId,
+            productsCount: node.productsCount,
+            children: filterAndMap(node.children), // Рекурсия для любого уровня вложенности
+          });
+        });
+    };
+
+    return filterAndMap(roots);
   }
 
   async findOne(id: string): Promise<CategoryRdo> {
@@ -275,7 +291,7 @@ export class CategoriesService {
 
     try {
       await this.prisma.category.delete({ where: { id } });
-      
+
       await this.logsService.create({
         type: LogType.warning,
         message: `Удалена категория: ${existing.name}`,
