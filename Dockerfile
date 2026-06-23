@@ -22,6 +22,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Генерация Prisma Client
+RUN npx prisma migrate deploy
 RUN npx prisma generate
 
 # Сборка NestJS
