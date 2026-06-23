@@ -1,36 +1,47 @@
-FROM node AS base
+# syntax=docker.io/docker/dockerfile:1
 
-FROM base AS deps
+FROM node:20-alpine AS base
 WORKDIR /app
+
+# 1. Установка всех зависимостей (включая dev для генерации Prisma и сборки)
+FROM base AS deps
 COPY package*.json ./
 COPY prisma ./prisma/
 RUN npm ci
-RUN npm install -g @nestjs/cli
 
-FROM deps AS prisma-gen
+# 2. Сборка приложения и генерация Prisma Client
+FROM base AS builder
+WORKDIR /app
+# Копируем node_modules из deps
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Генерируем Prisma Client (создаст папки .prisma и @prisma в node_modules)
 RUN npx prisma generate
 
-FROM prisma-gen AS builder
-WORKDIR /app
-COPY . .
+# Собираем NestJS (создаст папку dist)
 RUN npm run build
 
+# 3. Production-образ (минимальный размер)
 FROM base AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 
-RUN addgroup --system --gid 1001 nestjs
-RUN adduser --system --uid 1001 nestjs
+# Создаем пользователя (синтаксис для Alpine Linux)
+RUN addgroup -S nestjs && adduser -S nestjs -G nestjs
 
+# Копируем package.json и устанавливаем ТОЛЬКО production-зависимости
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Копируем собранный код и Prisma
-COPY --from=builder /app/dist ./dist
-COPY --from=prisma-gen /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=prisma-gen /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/prisma ./prisma
+# Копируем сгенерированный Prisma Client из builder
+COPY --from=builder --chown=nestjs:nestjs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=nestjs:nestjs /app/node_modules/@prisma ./node_modules/@prisma
+
+# Копируем скомпилированный код и папку prisma (схема нужна для миграций)
+COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
+COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
 
 USER nestjs
 
