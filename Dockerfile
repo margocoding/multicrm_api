@@ -51,6 +51,7 @@ COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
 
 # Prisma generated client
 COPY --from=builder --chown=nestjs:nestjs /app/generated ./generated
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 
 USER nestjs
 
