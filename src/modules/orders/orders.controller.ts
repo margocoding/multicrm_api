@@ -8,6 +8,7 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -22,13 +23,17 @@ import { CreateOrderDto } from './dto/create-order.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
 import { OrderRdo } from './rdo/order.rdo.js';
 import { OrdersService } from './orders.service.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'; 
+import { Public } from '../auth/decorators/public.decorator.js'; 
 
 @ApiTags('Orders')
 @Controller('orders')
+@UseGuards(JwtAuthGuard) 
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Post()
+  @Public()
   @ApiOperation({ summary: 'Создать заказ' })
   @ApiResponse({ status: 201, type: OrderRdo })
   @ApiBadRequestResponse({ description: 'Недостаточно товара на складе' })

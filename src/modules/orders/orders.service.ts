@@ -187,9 +187,15 @@ export class OrdersService {
           include: { items: true },
         });
 
-        for (const item of order.items) {
+        // АРХИТЕКТУРНОЕ РЕШЕНИЕ: 
+        // Возвращаем остатки на склад ТОЛЬКО для тех товаров, которые еще существуют в БД.
+        // Если товар был удален (например, вместе с импортом), item.productId будет null,
+        // и возвращать его на склад бессмысленно, так как самого товара больше нет.
+        const validItems = order.items.filter((item) => item.productId !== null);
+
+        for (const item of validItems) {
           await tx.product.update({
-            where: { id: item.productId },
+            where: { id: item.productId as string },
             data: { quantity: { increment: item.quantity } },
           });
         }
@@ -199,7 +205,7 @@ export class OrdersService {
 
       await this.logsService.create({
         type: LogType.warning,
-        message: `Заказ #${id.slice(0, 8)} отменен. Остатки возвращены.`,
+        message: `Заказ #${id.slice(0, 8)} отменен. Остатки возвращены для существующих товаров.`,
       });
 
       return fillDto(OrderRdo, updated);
@@ -232,9 +238,14 @@ export class OrdersService {
       });
 
       await this.prisma.$transaction(async (tx) => {
-        for (const item of full!.items) {
+        // АРХИТЕКТУРНОЕ РЕШЕНИЕ:
+        // При удалении заказа возвращаем остатки только для физически существующих товаров.
+        // Позиции с productId === null (удаленные товары) игнорируются.
+        const validItems = full!.items.filter((item) => item.productId !== null);
+
+        for (const item of validItems) {
           await tx.product.update({
-            where: { id: item.productId },
+            where: { id: item.productId as string },
             data: { quantity: { increment: item.quantity } },
           });
         }
@@ -243,7 +254,7 @@ export class OrdersService {
       
       await this.logsService.create({
         type: LogType.warning,
-        message: `Заказ #${id.slice(0, 8)} удален. Остатки возвращены.`,
+        message: `Заказ #${id.slice(0, 8)} удален. Остатки возвращены для существующих товаров.`,
       });
     } else {
       await this.prisma.order.delete({ where: { id } });

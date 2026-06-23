@@ -14,6 +14,7 @@ import {
   ParseFilePipe,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -41,9 +42,12 @@ import {
   MAX_FILE_SIZE,
 } from '../../common/utils/constants.js';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { Public } from '../auth/decorators/public.decorator.js';
 
 @ApiTags('Products')
 @Controller('products')
+@UseGuards(JwtAuthGuard)
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
@@ -55,6 +59,7 @@ export class ProductsController {
   }
 
   @Post('by-domain')
+  @Public() // 🟢 Публичный роут для фронтенда (SSR)
   @ApiOperation({ summary: 'Получить товары по домену сайта' })
   @ApiResponse({ status: 200, type: PaginatedRdo(ProductRdo) })
   @ApiNotFoundResponse({ description: 'Сайт не найден' })
@@ -89,9 +94,7 @@ export class ProductsController {
             maxSize: MAX_FILE_SIZE,
             message: 'Размер изображения не должен превышать 15 МБ',
           }),
-          new FileTypeValidator({
-            fileType: IMAGE_MIME_TYPE,
-          }),
+          new FileTypeValidator({ fileType: IMAGE_MIME_TYPE }),
         ],
         fileIsRequired: false,
       }),
@@ -130,9 +133,7 @@ export class ProductsController {
             maxSize: MAX_FILE_SIZE,
             message: 'Размер изображения не должен превышать 15 МБ',
           }),
-          new FileTypeValidator({
-            fileType: IMAGE_MIME_TYPE,
-          }),
+          new FileTypeValidator({ fileType: IMAGE_MIME_TYPE }),
         ],
         fileIsRequired: false,
       }),

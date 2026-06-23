@@ -440,7 +440,7 @@ export class ProductsService {
       this.filesService.deleteFile(product.image);
     }
 
-    try {
+    try {      
       await this.prisma.product.delete({ where: { id } });
       
       await this.logsService.create({

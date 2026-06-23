@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -22,9 +23,12 @@ import { CategoriesService } from './categories.service.js';
 import { CreateCategoryDto } from './dto/create-category.dto.js';
 import { UpdateCategoryDto } from './dto/update-category.dto.js';
 import { CategoryRdo } from './rdo/category.rdo.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js'; 
+import { Public } from '../auth/decorators/public.decorator.js'; 
 
 @ApiTags('Categories')
 @Controller('categories')
+@UseGuards(JwtAuthGuard) 
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
@@ -43,6 +47,7 @@ export class CategoriesController {
   }
 
   @Get('by-domain')
+  @Public() // 🟢 Публичный роут для фронтенда (SSR)
   @ApiOperation({ summary: 'Получить категории по домену (только с товарами)' })
   @ApiResponse({ status: 200, type: [CategoryRdo] })
   @ApiNotFoundResponse({ description: 'Сайт не найден' })
