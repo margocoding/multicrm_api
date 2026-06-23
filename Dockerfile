@@ -14,7 +14,7 @@ COPY prisma ./prisma/
 RUN npm ci
 
 # =========================
-# Build
+# Builder
 # =========================
 FROM base AS builder
 
@@ -36,25 +36,27 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# Создаём непривилегированного пользователя
 RUN addgroup -S nestjs && adduser -S nestjs -G nestjs
 
 COPY package*.json ./
 
-# Только production зависимости
-RUN npm ci --omit=dev && npm cache clean --force
+# Устанавливаем только production зависимости + Prisma
+RUN npm ci --omit=dev --include=prisma && npm cache clean --force
 
-# Собранный NestJS
+# Копируем собранное приложение
 COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
 
-# Prisma schema
+# Prisma файлы (очень важно для migrate deploy)
 COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
+COPY --from=builder --chown=nestjs:nestjs /app/prisma.config.ts ./prisma.config.ts
 
-# Prisma generated client
-COPY --from=builder --chown=nestjs:nestjs /app/generated ./generated
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+# Если у тебя есть папка generated (некоторые используют)
+# COPY --from=builder --chown=nestjs:nestjs /app/generated ./generated
 
 USER nestjs
 
 EXPOSE 4000
 
+# Запуск миграций + приложение
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
