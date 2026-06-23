@@ -211,6 +211,7 @@ export class ProductsService {
           price: dto.price,
           priceUnit: dto.priceUnit,
           image: imagePath,
+          quantity: dto.quantity,
           categoryId: dto.categoryId ?? null,
           sites: dto.siteIds?.length
             ? {
