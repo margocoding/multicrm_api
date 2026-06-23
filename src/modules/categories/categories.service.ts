@@ -91,9 +91,6 @@ export class CategoriesService {
       throw new NotFoundException(`Сайт с доменом ${domain} не найден`);
     }
 
-    // 1. Загружаем ВСЕ категории и считаем количество товаров для каждой.
-    // Это гарантирует, что мы не потеряем пустые корневые категории,
-    // у которых товары есть только у детей.
     const allCategories = await this.prisma.category.findMany({
       include: {
         _count: {
@@ -114,19 +111,17 @@ export class CategoriesService {
       orderBy: { name: 'asc' },
     });
 
-    // Вспомогательный интерфейс для построения дерева
     interface CategoryNode {
       id: string;
       name: string;
       parentId: string | null;
       productsCount: number;
-      totalProducts: number; // Свои товары + товары всех потомков
+      totalProducts: number;
       children: CategoryNode[];
     }
 
     const map = new Map<string, CategoryNode>();
 
-    // 2. Инициализируем узлы дерева
     allCategories.forEach((cat) => {
       map.set(cat.id, {
         id: cat.id,
@@ -138,7 +133,6 @@ export class CategoriesService {
       });
     });
 
-    // 3. Связываем детей с родителями
     allCategories.forEach((cat) => {
       const node = map.get(cat.id)!;
       if (cat.parentId && map.has(cat.parentId)) {
@@ -147,7 +141,6 @@ export class CategoriesService {
       }
     });
 
-    // 4. Собираем корневые узлы (у которых нет parentId или родитель отсутствует)
     const roots: CategoryNode[] = [];
     allCategories.forEach((cat) => {
       if (!cat.parentId || !map.has(cat.parentId)) {
@@ -155,31 +148,29 @@ export class CategoriesService {
       }
     });
 
-    // 5. Рекурсивно вычисляем totalProducts снизу вверх
     const calculateTotals = (nodes: CategoryNode[]) => {
       nodes.forEach((node) => {
-        calculateTotals(node.children); // Сначала считаем для детей
+        calculateTotals(node.children); 
         const childrenTotal = node.children.reduce(
           (sum, child) => sum + child.totalProducts,
           0,
         );
-        node.totalProducts += childrenTotal; // Добавляем товары детей к своим
+        node.totalProducts += childrenTotal; 
       });
     };
 
     calculateTotals(roots);
 
-    // 6. Фильтруем пустые ветки и формируем DTO рекурсивно
     const filterAndMap = (nodes: CategoryNode[]): CategoryRdo[] => {
       return nodes
-        .filter((node) => node.totalProducts > 0) // Оставляем только ветки, где есть товары
+        .filter((node) => node.totalProducts > 0) 
         .map((node) => {
           return fillDto(CategoryRdo, {
             id: node.id,
             name: node.name,
             parentId: node.parentId,
             productsCount: node.productsCount,
-            children: filterAndMap(node.children), // Рекурсия для любого уровня вложенности
+            children: filterAndMap(node.children), 
           });
         });
     };
@@ -274,19 +265,10 @@ export class CategoriesService {
   async remove(id: string): Promise<void> {
     const existing = await this.prisma.category.findUnique({
       where: { id },
-      include: {
-        _count: { select: { products: true, children: true } },
-      },
     });
 
     if (!existing) {
       throw new NotFoundException(`Категория ${id} не найдена`);
-    }
-
-    if (existing._count.children > 0) {
-      throw new NotFoundException(
-        'Нельзя удалить категорию с дочерними категориями. Сначала удалите или перенесите их.',
-      );
     }
 
     try {
@@ -294,7 +276,7 @@ export class CategoriesService {
 
       await this.logsService.create({
         type: LogType.warning,
-        message: `Удалена категория: ${existing.name}`,
+        message: `Удалена категория и все связанные сущности: ${existing.name}`,
       });
     } catch (error) {
       await this.logsService.create({

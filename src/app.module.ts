@@ -9,6 +9,7 @@ import { CategoriesModule } from './modules/categories/categories.module.js';
 import { OrdersModule } from './modules/orders/orders.module.js';
 import { LogsModule } from './modules/logs/logs.module.js';
 import { ImportsModule } from './modules/imports/imports.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
 
 @Module({
   imports: [
@@ -23,7 +24,8 @@ import { ImportsModule } from './modules/imports/imports.module.js';
     CategoriesModule,
     OrdersModule,
     LogsModule,
-    ImportsModule
+    ImportsModule,
+    AuthModule,
   ],
   controllers: [],
   providers: [],

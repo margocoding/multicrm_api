@@ -1,10 +1,24 @@
-import { 
-  Controller, Get, Post, Body, Param, Delete, Query, Patch, 
-  HttpCode, HttpStatus 
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  Query,
+  Patch,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { 
-  ApiTags, ApiOperation, ApiResponse, ApiParam,
-  ApiConflictResponse, ApiNotFoundResponse, ApiNoContentResponse
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiConflictResponse,
+  ApiNotFoundResponse,
+  ApiNoContentResponse,
 } from '@nestjs/swagger';
 
 import { SitesService } from './sites.service.js';
@@ -12,10 +26,15 @@ import { CreateSiteDto } from './dto/create-site.dto.js';
 import { UpdateSiteDto } from './dto/update-site.dto.js';
 import { GetSitesDto } from './dto/get-sites.dto.js';
 import { SiteRdo } from './rdo/site.rdo.js';
-import { PaginatedRdo, PaginationRdo } from '../../common/rdo/pagination.rdo.js';
+import {
+  PaginatedRdo,
+  PaginationRdo,
+} from '../../common/rdo/pagination.rdo.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 
 @ApiTags('Sites')
 @Controller('sites')
+@UseGuards(JwtAuthGuard)
 export class SitesController {
   constructor(private readonly sitesService: SitesService) {}
 
@@ -40,7 +59,10 @@ export class SitesController {
   @ApiResponse({ status: 200, type: SiteRdo })
   @ApiNotFoundResponse({ description: 'Сайт не найден' })
   @ApiConflictResponse({ description: 'Сайт с таким доменом уже существует' })
-  update(@Param('id') id: string, @Body() dto: UpdateSiteDto): Promise<SiteRdo> {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSiteDto,
+  ): Promise<SiteRdo> {
     return this.sitesService.update(id, dto);
   }
 

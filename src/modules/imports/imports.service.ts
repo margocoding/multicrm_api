@@ -6,7 +6,6 @@ import * as xml2js from 'xml2js';
 import { fillDto } from '../../common/utils/fillDto.js';
 import { ImportBatchRdo } from './rdo/import-batch.rdo.js';
 import { CreateImportDto } from './dto/create-import.dto.js';
-import { normalizeId } from '../../common/utils/utils.js';
 
 type NormalizedCategory = {
   id: string;
@@ -70,7 +69,10 @@ export class ImportsService {
 
     const result = await parser.parseStringPromise(content);
     console.log('[IMPORT] Parsed XML root keys:', Object.keys(result || {}));
-    console.log('[IMPORT] yml_catalog keys:', Object.keys(result?.yml_catalog || {}));
+    console.log(
+      '[IMPORT] yml_catalog keys:',
+      Object.keys(result?.yml_catalog || {}),
+    );
 
     if (!result?.yml_catalog?.shop) {
       throw new Error('Invalid XML structure: missing yml_catalog.shop');
@@ -81,18 +83,29 @@ export class ImportsService {
 
   private parseJson(content: string): any {
     const data = JSON.parse(content);
-    console.log('[IMPORT] Parsed JSON structure');
 
-    if (!data?.shop?.categories || !data?.shop?.offers) {
+    if (!data?.shop) {
       throw new Error('Invalid JSON structure');
     }
 
-    return data.shop;
+    return {
+      ...data.shop,
+
+      categories: {
+        category: Array.isArray(data.shop.categories)
+          ? data.shop.categories
+          : [],
+      },
+
+      offers: {
+        offer: Array.isArray(data.shop.offers) ? data.shop.offers : [],
+      },
+    };
   }
 
-  // ----------------------------
-  // Normalize
-  // ----------------------------
+  private normalizeId(categoryId: string | null) {
+    return categoryId?.trim() ?? null;
+  }
 
   private normalizeCategories(raw: any): NormalizedCategory[] {
     const list = Array.isArray(raw?.category)
@@ -106,17 +119,17 @@ export class ImportsService {
     const normalized = list
       .map((cat: any) => {
         const idRaw = this.extractValue(cat.id ?? cat.$?.id);
-        const id = normalizeId(idRaw);
+        const id = this.normalizeId(idRaw);
         const name = this.extractValue(cat.name ?? cat._ ?? cat.$?.name);
 
         let parentIdRaw = this.extractValue(cat.parentId ?? cat.$?.parentId);
-        let parentId = normalizeId(parentIdRaw);
+        let parentId = this.normalizeId(parentIdRaw);
         if (parentId === '0') parentId = null;
 
         const resultCat = { id, parentId: parentId ?? null, name };
 
         console.log(`[IMPORT] Normalized category →`, resultCat);
-        return (!id || !name) ? null : resultCat;
+        return !id || !name ? null : resultCat;
       })
       .filter(Boolean) as NormalizedCategory[];
 
@@ -138,10 +151,14 @@ export class ImportsService {
         const id = this.extractValue(offer.id ?? offer.$?.id);
         const name = this.extractValue(offer.name ?? offer.$?.name);
         const price = this.extractValue(offer.price ?? offer.$?.price);
-        const categoryIdRaw = this.extractValue(offer.categoryId ?? offer.$?.categoryId);
-        const categoryId = normalizeId(categoryIdRaw);
+        const categoryIdRaw = this.extractValue(
+          offer.categoryId ?? offer.$?.categoryId,
+        );
+        const categoryId = this.normalizeId(categoryIdRaw);
 
-        console.log(`[IMPORT] Offer "${name}" → categoryId raw="${categoryIdRaw}" → normalized="${categoryId}"`);
+        console.log(
+          `[IMPORT] Offer "${name}" → categoryId raw="${categoryIdRaw}" → normalized="${categoryId}"`,
+        );
 
         if (!name || !price) return null;
 
@@ -157,10 +174,16 @@ export class ImportsService {
           ),
           picture: this.extractValue(offer.picture ?? offer.$?.picture) ?? null,
           quantity: isNaN(
-            parseInt(this.extractValue(offer.count ?? offer.$?.count) || '0', 10),
+            parseInt(
+              this.extractValue(offer.count ?? offer.$?.count) || '0',
+              10,
+            ),
           )
             ? null
-            : parseInt(this.extractValue(offer.count ?? offer.$?.count) || '0', 10),
+            : parseInt(
+                this.extractValue(offer.count ?? offer.$?.count) || '0',
+                10,
+              ),
         };
       })
       .filter(Boolean) as NormalizedOffer[];
@@ -173,42 +196,51 @@ export class ImportsService {
   }
 
   // ----------------------------
-  // FIXED CATEGORY SYNC (2 PASS)
+  // CATEGORY SYNC (Обновлено)
   // ----------------------------
 
-  private async syncCategories(categories: NormalizedCategory[]) {
+  private async syncCategories(
+    categories: NormalizedCategory[],
+    importBatchId: string,
+  ) {
     const categoryMap = new Map<string, string>();
     let createdCount = 0;
     let existingCount = 0;
 
     console.log('[IMPORT] === STARTING CATEGORY SYNC ===', categories.length);
 
-    // PASS 1 — создаём ВСЕ категории
     for (const cat of categories) {
-      const existing = await this.prisma.category.findFirst({
+      let dbCategory = await this.prisma.category.findFirst({
         where: { name: cat.name },
       });
 
-      const dbCategory =
-        existing ??
-        (await this.prisma.category.create({
+      if (dbCategory) {
+        // Категория уже существует. Обновляем importBatchId,
+        // чтобы она принадлежала текущему импорту и удалилась вместе с ним.
+        dbCategory = await this.prisma.category.update({
+          where: { id: dbCategory.id },
+          data: { importBatchId },
+        });
+        existingCount++;
+      } else {
+        dbCategory = await this.prisma.category.create({
           data: {
             name: cat.name,
             parentId: null,
+            importBatchId,
           },
-        }));
-
-      if (existing) existingCount++;
-      else createdCount++;
+        });
+        createdCount++;
+      }
 
       categoryMap.set(cat.id, dbCategory.id);
 
       console.log(
-        `[IMPORT] Category "${cat.name}" (xmlId=${cat.id}) → dbId=${dbCategory.id} (${existing ? 'EXISTING' : 'CREATED'})`,
+        `[IMPORT] Category "${cat.name}" (xmlId=${cat.id}) → dbId=${dbCategory.id} (UPDATED/CREATED)`,
       );
     }
 
-    // PASS 2 — проставляем parentId
+    // Проставляем parentId
     for (const cat of categories) {
       if (!cat.parentId) continue;
 
@@ -220,7 +252,9 @@ export class ImportsService {
           where: { id: childDbId },
           data: { parentId: parentDbId },
         });
-        console.log(`[IMPORT] Set parent for "${cat.name}": ${parentDbId} → ${childDbId}`);
+        console.log(
+          `[IMPORT] Set parent for "${cat.name}": ${parentDbId} → ${childDbId}`,
+        );
       } else {
         console.log(`[IMPORT] WARNING: Could not set parent for ${cat.name}`);
       }
@@ -237,6 +271,7 @@ export class ImportsService {
   private async importProducts(
     offers: NormalizedOffer[],
     categoryMap: Map<string, string>,
+    importBatchId: string,
   ) {
     const productIds: string[] = [];
 
@@ -260,6 +295,7 @@ export class ImportsService {
         image: offer.picture ?? null,
         quantity: offer.quantity ?? 0,
         categoryId: categoryDbId ?? null,
+        importBatchId,
       };
 
       const result = await this.prisma.product.upsert({
@@ -312,7 +348,9 @@ export class ImportsService {
     targetSiteIds: string[],
   ) {
     try {
-      console.log(`[IMPORT] === START PROCESSING FILE: ${file.originalname} ===`);
+      console.log(
+        `[IMPORT] === START PROCESSING FILE: ${file.originalname} ===`,
+      );
 
       const content = file.buffer.toString('utf-8');
 
@@ -323,9 +361,14 @@ export class ImportsService {
       const categories = this.normalizeCategories(shop.categories);
       const offers = this.normalizeOffers(shop.offers);
 
-      const { categoryMap } = await this.syncCategories(categories);
+      const { categoryMap } = await this.syncCategories(categories, importId);
 
-      const productIds = await this.importProducts(offers, categoryMap);
+      // Передаем importId для сохранения связи с продуктами
+      const productIds = await this.importProducts(
+        offers,
+        categoryMap,
+        importId,
+      );
 
       await this.publishToSites(productIds, targetSiteIds);
 
@@ -429,7 +472,7 @@ export class ImportsService {
 
     await this.logsService.create({
       type: LogType.warning,
-      message: `Deleted import: ${imp.name}`,
+      message: `Удален импорт и все связанные категории/продукты: ${imp.name}`,
     });
   }
 }
