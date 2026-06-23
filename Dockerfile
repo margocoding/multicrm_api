@@ -3,45 +3,54 @@
 FROM node:20-alpine AS base
 WORKDIR /app
 
-# 1. Установка всех зависимостей (включая dev для генерации Prisma и сборки)
+# =========================
+# Dependencies
+# =========================
 FROM base AS deps
+
 COPY package*.json ./
 COPY prisma ./prisma/
+
 RUN npm ci
 
-# 2. Сборка приложения и генерация Prisma Client
+# =========================
+# Build
+# =========================
 FROM base AS builder
-WORKDIR /app
-# Копируем node_modules из deps
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Генерируем Prisma Client (создаст папки .prisma и @prisma в node_modules)
+# Генерация Prisma Client
 RUN npx prisma generate
 
-# Собираем NestJS (создаст папку dist)
+# Сборка NestJS
 RUN npm run build
 
-# 3. Production-образ (минимальный размер)
+# =========================
+# Production
+# =========================
 FROM base AS runner
+
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Создаем пользователя (синтаксис для Alpine Linux)
 RUN addgroup -S nestjs && adduser -S nestjs -G nestjs
 
-# Копируем package.json и устанавливаем ТОЛЬКО production-зависимости
 COPY package*.json ./
+
+# Только production зависимости
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Копируем сгенерированный Prisma Client из builder
-COPY --from=builder --chown=nestjs:nestjs /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder --chown=nestjs:nestjs /app/node_modules/@prisma ./node_modules/@prisma
-
-# Копируем скомпилированный код и папку prisma (схема нужна для миграций)
+# Собранный NestJS
 COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
+
+# Prisma schema
 COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
+
+# Prisma generated client
+COPY --from=builder --chown=nestjs:nestjs /app/generated ./generated
 
 USER nestjs
 
