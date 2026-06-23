@@ -22,7 +22,6 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Генерация Prisma Client
-RUN npx prisma migrate deploy
 RUN npx prisma generate
 
 # Сборка NestJS
@@ -57,4 +56,4 @@ USER nestjs
 
 EXPOSE 4000
 
-CMD ["node", "dist/src/main"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
