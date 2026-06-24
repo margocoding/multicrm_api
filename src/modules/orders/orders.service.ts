@@ -9,9 +9,7 @@ import { OrderRdo } from './rdo/order.rdo.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { fillDto } from '../../common/utils/fillDto.js';
 import { LogsService } from '../logs/logs.service.js';
-import { LogType } from '../../../generated/prisma/client.js';
-
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
+import { LogType, ProductCondition } from '../../../generated/prisma/client.js';
 
 @Injectable()
 export class OrdersService {
@@ -20,10 +18,34 @@ export class OrdersService {
     private readonly logsService: LogsService,
   ) {}
 
+  private normalizeCharacteristics(raw: any): { title: string; value: string }[] {
+    if (!raw) return [];
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return [];
+      }
+    }
+    if (Array.isArray(raw)) return raw;
+    return [];
+  }
+
+  private mapOrder(order: any): any {
+    return {
+      ...order,
+      items: order.items.map((item: any) => ({
+        ...item,
+        characteristics: this.normalizeCharacteristics(item.characteristics),
+      })),
+    };
+  }
+
   async create(dto: CreateOrderDto): Promise<OrderRdo> {
     const productIds = dto.items.map((i) => i.productId);
     const products = await this.prisma.product.findMany({
       where: { id: { in: productIds } },
+      include: { characteristics: true },
     });
 
     if (products.length !== productIds.length) {
@@ -40,6 +62,12 @@ export class OrdersService {
       quantity: number;
       price: number;
       name: string;
+      subtitle: string | null;
+      image: string | null;
+      slug: string;
+      unit: string;
+      condition: string;
+      characteristics: { title: string; value: string }[];
     }[] = [];
 
     for (const item of dto.items) {
@@ -64,6 +92,15 @@ export class OrdersService {
         quantity: item.quantity,
         price,
         name: product.name,
+        subtitle: product.subtitle,
+        image: product.image,
+        slug: product.slug!,
+        unit: product.unit,
+        condition: product.condition,
+        characteristics: product.characteristics.map((c) => ({
+          title: c.title,
+          value: c.value,
+        })),
       });
     }
 
@@ -81,6 +118,12 @@ export class OrdersService {
               quantity: item.quantity,
               price: item.price.toFixed(2),
               name: item.name,
+              subtitle: item.subtitle,
+              image: item.image,
+              slug: item.slug,
+              unit: item.unit,
+              condition: item.condition as ProductCondition,
+              characteristics: JSON.stringify(item.characteristics),
             })),
           },
         },
@@ -104,7 +147,7 @@ export class OrdersService {
       message: `Создан новый заказ #${order.id.slice(0, 8)} от ${order.email} на сумму ${order.totalPrice} ${order.currency}`,
     });
 
-    return fillDto(OrderRdo, order);
+    return fillDto(OrderRdo, this.mapOrder(order));
   }
 
   async findAll(): Promise<OrderRdo[]> {
@@ -113,50 +156,20 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return orders.map((order) => fillDto(OrderRdo, order));
+    return orders.map((order) => fillDto(OrderRdo, this.mapOrder(order)));
   }
 
   async findOne(id: string): Promise<OrderRdo> {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: {
-        items: {
-          include: {
-            product: {
-              select: {
-                image: true,
-                subtitle: true,
-                standard: true,
-                length: true,
-                weight: true,
-              },
-            },
-          },
-        },
-      },
+      include: { items: true },
     });
 
     if (!order) {
       throw new NotFoundException(`Заказ ${id} не найден`);
     }
 
-    const mappedItems = order.items.map((item) => ({
-      id: item.id,
-      productId: item.productId,
-      name: item.name,
-      subtitle: item.product?.subtitle ?? null,
-      standard: item.product?.standard ?? null,
-      length: item.product?.length ?? null,
-      weight: item.product?.weight ?? null,
-      image: item.product?.image ?? null,
-      quantity: item.quantity,
-      price: item.price,
-    }));
-
-    return fillDto(OrderRdo, {
-      ...order,
-      items: mappedItems,
-    });
+    return fillDto(OrderRdo, this.mapOrder(order));
   }
 
   async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<OrderRdo> {
@@ -170,7 +183,7 @@ export class OrdersService {
     }
 
     if (order.status === dto.status) {
-      return fillDto(OrderRdo, order);
+      return fillDto(OrderRdo, this.mapOrder(order));
     }
 
     if (order.status === 'CANCELLED') {
@@ -187,10 +200,6 @@ export class OrdersService {
           include: { items: true },
         });
 
-        // АРХИТЕКТУРНОЕ РЕШЕНИЕ: 
-        // Возвращаем остатки на склад ТОЛЬКО для тех товаров, которые еще существуют в БД.
-        // Если товар был удален (например, вместе с импортом), item.productId будет null,
-        // и возвращать его на склад бессмысленно, так как самого товара больше нет.
         const validItems = order.items.filter((item) => item.productId !== null);
 
         for (const item of validItems) {
@@ -208,7 +217,7 @@ export class OrdersService {
         message: `Заказ #${id.slice(0, 8)} отменен. Остатки возвращены для существующих товаров.`,
       });
 
-      return fillDto(OrderRdo, updated);
+      return fillDto(OrderRdo, this.mapOrder(updated));
     }
 
     const updated = await this.prisma.order.update({
@@ -222,7 +231,7 @@ export class OrdersService {
       message: `Статус заказа #${id.slice(0, 8)} изменен на ${dto.status}`,
     });
 
-    return fillDto(OrderRdo, updated);
+    return fillDto(OrderRdo, this.mapOrder(updated));
   }
 
   async remove(id: string): Promise<void> {
@@ -238,9 +247,6 @@ export class OrdersService {
       });
 
       await this.prisma.$transaction(async (tx) => {
-        // АРХИТЕКТУРНОЕ РЕШЕНИЕ:
-        // При удалении заказа возвращаем остатки только для физически существующих товаров.
-        // Позиции с productId === null (удаленные товары) игнорируются.
         const validItems = full!.items.filter((item) => item.productId !== null);
 
         for (const item of validItems) {

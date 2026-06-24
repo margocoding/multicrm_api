@@ -1,7 +1,7 @@
-// product.rdo.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 import { IsArray, IsOptional, ValidateNested } from 'class-validator';
+import { ProductCondition } from '../../../../generated/prisma/enums';
 
 export class PublishedSiteRdo {
   @ApiProperty({
@@ -16,6 +16,20 @@ export class PublishedSiteRdo {
   domain: string;
 }
 
+export class CharacteristicRdo {
+  @ApiProperty({ description: 'ID характеристики', example: 'uuid-123' })
+  @Expose()
+  id: string;
+
+  @ApiProperty({ description: 'Название характеристики', example: 'Вес' })
+  @Expose()
+  title: string;
+
+  @ApiProperty({ description: 'Значение характеристики', example: '2.5 кг' })
+  @Expose()
+  value: string;
+}
+
 export class ProductRdo {
   @ApiProperty({
     description: 'ID товара',
@@ -23,6 +37,10 @@ export class ProductRdo {
   })
   @Expose()
   id: string;
+
+  @ApiProperty({ description: 'Slug (ЧПУ) товара', example: 'relysa-alyuminievaya' })
+  @Expose()
+  slug: string;
 
   @ApiProperty({ description: 'Название товара', example: 'Рельса' })
   @Expose()
@@ -35,40 +53,47 @@ export class ProductRdo {
   @Expose()
   subtitle?: string;
 
-  @ApiPropertyOptional({ description: 'Стандарт', example: 'VESA' })
-  @Expose()
-  standard?: string;
-
-  @ApiPropertyOptional({ description: 'Длина', example: '1000 мм' })
-  @Expose()
-  length?: string;
-
-  @ApiPropertyOptional({ description: 'Вес', example: '2.5 кг' })
-  @Expose()
-  weight?: string;
-
   @ApiProperty({ description: 'Цена', example: '1500' })
   @Expose()
   price: string;
 
-  @ApiProperty({ description: 'Единица измерения цены', example: 'RUB' })
+  @ApiProperty({ description: 'Валюта цены', example: 'RUB' })
   @Expose()
   priceUnit: string;
-
-  @ApiProperty({ description: 'Статус наличия', example: 'IN STOCK' })
-  @Expose()
-  status: 'IN STOCK' | 'OUT OF STOCK';
 
   @ApiProperty({
     description: 'URL изображения',
     example: 'https://example.com/image.jpg',
   })
   @Expose()
-  image: string;
+  image: string | null;
 
-  @ApiProperty({ description: 'Тип продукта', example: 'rail' })
+  @ApiProperty({ description: 'Количество на складе', example: 100 })
   @Expose()
-  type: 'rail' | 'component';
+  quantity: number;
+
+  @ApiProperty({ description: 'Единица измерения товара', example: 'шт' })
+  @Expose()
+  unit: string;
+
+  @ApiProperty({ 
+    description: 'Состояние товара', 
+    enum: ProductCondition,
+    example: ProductCondition.NEW 
+  })
+  @Expose()
+  condition: ProductCondition;
+
+  @ApiPropertyOptional({ description: 'ID категории' })
+  @Expose()
+  categoryId?: string | null;
+
+  @ApiProperty({ description: 'Характеристики товара', type: [CharacteristicRdo] })
+  @Expose()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CharacteristicRdo)
+  characteristics: CharacteristicRdo[];
 
   @ApiProperty({
     description: 'Количество сайтов, на которых опубликован',
@@ -77,16 +102,8 @@ export class ProductRdo {
   @Expose()
   publishedSitesCount: number;
 
-  @ApiProperty({
-    description: 'Дата создания',
-    example: '2026-01-15T10:30:00.000Z',
-  })
-  @Expose()
-  createdAt: Date;
-
   @ApiPropertyOptional({
-    description:
-      'Список опубликованных сайтов (заполняется только в fetchById)',
+    description: 'Список опубликованных сайтов (заполняется при получении одного товара)',
     type: [PublishedSiteRdo],
   })
   @Expose()
@@ -96,11 +113,10 @@ export class ProductRdo {
   @Type(() => PublishedSiteRdo)
   publishedSites?: PublishedSiteRdo[];
 
-  @ApiProperty()
+  @ApiProperty({
+    description: 'Дата создания',
+    example: '2026-01-15T10:30:00.000Z',
+  })
   @Expose()
-  quantity: number;
-
-  @ApiPropertyOptional({ description: 'ID категории' })
-  @Expose()
-  categoryId?: string | null;
+  createdAt: Date;
 }

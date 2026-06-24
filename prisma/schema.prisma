@@ -43,6 +43,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ProductCondition {
+  NEW
+  USED
+  REFURBISHED
+  RESERVED
+}
+
 model User {
   id        String   @id @default(uuid())
   username  String   @unique
@@ -85,21 +92,26 @@ model Category {
 }
 
 model Product {
-  id         String    @id @default(uuid())
-  name       String
-  subtitle   String?
-  standard   String?
-  length     String?
-  weight     String?
-  price      String
-  priceUnit  String
-  image      String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  externalId String?   @unique
-  categoryId String?
-  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade) // <-- Cascade: удаление категории удалит продукты
-  quantity   Int       @default(0)
+  id              String                  @id @default(uuid())
+  name            String
+  slug            String?                  @unique
+  subtitle        String?
+  standard        String?
+  length          String?
+  weight          String?
+  price           String
+  priceUnit       String
+  image           String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  externalId      String?                 @unique
+  categoryId      String?
+  category        Category?               @relation(fields: [categoryId], references: [id], onDelete: Cascade) // <-- Cascade: удаление категории удалит продукты
+  quantity        Int                     @default(0)
+  characteristics ProductCharacteristic[]
+
+  unit      String           @default("единица")
+  condition ProductCondition @default(NEW)
 
   importBatchId String?
   importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
@@ -108,15 +120,29 @@ model Product {
   orderItems OrderItem[]
 }
 
+model ProductCharacteristic {
+  id        String  @id @default(uuid())
+  title     String
+  value     String
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
 model OrderItem {
-  id        String   @id @default(cuid())
-  orderId   String
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId String? // <-- Сделано опциональным (String?)
-  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull) // <-- SetNull: продукт удаляется, ссылка в заказе обнуляется, заявка сохраняется
-  quantity  Int
-  price     String
-  name      String
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  quantity        Int
+  price           String
+  name            String
+  subtitle        String?
+  image           String?
+  slug            String?
+  unit            String   @default("шт")
+  condition       ProductCondition @default(NEW)
+  characteristics Json     @default("[]")
 }
 
 model ProductSite {
