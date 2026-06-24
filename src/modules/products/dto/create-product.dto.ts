@@ -1,48 +1,31 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  MaxLength,
-  IsArray,
-  IsEnum,
-  IsInt,
-} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { Type } from "class-transformer";
+import { IsArray, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
+import { ProductCondition } from "../../../../generated/prisma/enums";
+
+export class CharacteristicDto {
+  @ApiProperty({ description: 'Название характеристики' })
+  @IsString()
+  @IsNotEmpty()
+  title: string;
+
+  @ApiProperty({ description: 'Значение характеристики' })
+  @IsString()
+  @IsNotEmpty()
+  value: string;
+}
 
 export class CreateProductDto {
-  @ApiProperty({
-    description: 'Название товара',
-    example: 'Рельса',
-    maxLength: 255,
-  })
+  @ApiProperty({ description: 'Название товара', example: 'Рельса', maxLength: 255 })
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
   name: string;
 
-  @ApiPropertyOptional({
-    description: 'Подзаголовок',
-    example: 'Алюминиевый профиль',
-  })
+  @ApiPropertyOptional({ description: 'Подзаголовок', example: 'Алюминиевый профиль' })
   @IsString()
   @IsOptional()
   subtitle?: string;
-
-  @ApiPropertyOptional({ description: 'Стандарт', example: 'VESA' })
-  @IsString()
-  @IsOptional()
-  standard?: string;
-
-  @ApiPropertyOptional({ description: 'Длина', example: '1000 мм' })
-  @IsString()
-  @IsOptional()
-  length?: string;
-
-  @ApiPropertyOptional({ description: 'Вес', example: '2.5 кг' })
-  @IsString()
-  @IsOptional()
-  weight?: string;
 
   @ApiProperty({ description: 'Цена товара', example: '1500' })
   @IsString()
@@ -54,12 +37,7 @@ export class CreateProductDto {
   @IsNotEmpty()
   priceUnit: string;
 
-  @ApiPropertyOptional({
-    type: 'string',
-    format: 'binary',
-    description:
-      'Изображение товара (до 15 МБ, форматы: jpg, jpeg, png, gif, webp)',
-  })
+  @ApiPropertyOptional({ type: 'string', format: 'binary', description: 'Изображение товара' })
   @IsOptional()
   image?: Express.Multer.File;
 
@@ -67,11 +45,17 @@ export class CreateProductDto {
   @IsInt()
   quantity: number;
 
-  @ApiPropertyOptional({
-    description: 'ID сайтов для публикации',
-    example: ['123e4567-e89b-12d3-a456-426614174000'],
-    isArray: true,
-  })
+  @ApiPropertyOptional({ description: 'Единица измерения товара', example: 'шт', default: 'единица' })
+  @IsString()
+  @IsOptional()
+  unit?: string;
+
+  @ApiPropertyOptional({ enum: ProductCondition, description: 'Состояние товара', default: ProductCondition.NEW })
+  @IsEnum(ProductCondition)
+  @IsOptional()
+  condition?: ProductCondition;
+
+  @ApiPropertyOptional({ description: 'ID сайтов для публикации', isArray: true })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -81,4 +65,11 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   categoryId?: string | null;
+
+  @ApiPropertyOptional({ type: [CharacteristicDto], description: 'Массив характеристик' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CharacteristicDto)
+  characteristics?: CharacteristicDto[];
 }

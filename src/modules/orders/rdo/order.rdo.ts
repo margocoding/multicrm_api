@@ -1,15 +1,26 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 import { IsArray, ValidateNested } from 'class-validator';
+import { ProductCondition } from '../../../../generated/prisma/enums';
+
+export class OrderItemCharacteristicRdo {
+  @ApiProperty({ description: 'Название характеристики', example: 'Вес' })
+  @Expose()
+  title: string;
+
+  @ApiProperty({ description: 'Значение характеристики', example: '2.5 кг' })
+  @Expose()
+  value: string;
+}
 
 export class OrderItemRdo {
   @ApiProperty()
   @Expose()
   id: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
   @Expose()
-  productId: string;
+  productId?: string | null;
 
   @ApiProperty()
   @Expose()
@@ -19,17 +30,9 @@ export class OrderItemRdo {
   @Expose()
   subtitle?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Slug товара на момент заказа' })
   @Expose()
-  standard?: string | null;
-
-  @ApiPropertyOptional()
-  @Expose()
-  length?: string | null;
-
-  @ApiPropertyOptional()
-  @Expose()
-  weight?: string | null;
+  slug?: string | null;
 
   @ApiPropertyOptional()
   @Expose()
@@ -42,6 +45,21 @@ export class OrderItemRdo {
   @ApiProperty()
   @Expose()
   price: string;
+
+  @ApiProperty({ description: 'Единица измерения товара', example: 'шт' })
+  @Expose()
+  unit: string;
+
+  @ApiProperty({ enum: ProductCondition })
+  @Expose()
+  condition: ProductCondition;
+
+  @ApiProperty({ type: [OrderItemCharacteristicRdo] })
+  @Expose()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrderItemCharacteristicRdo)
+  characteristics: OrderItemCharacteristicRdo[];
 }
 
 export class OrderRdo {

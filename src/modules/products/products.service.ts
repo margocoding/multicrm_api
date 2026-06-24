@@ -2,13 +2,18 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ProductRdo } from './rdo/product.rdo.js';
 import { GetProductsDto } from './dto/get-products.dto.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { PublishToSiteDto } from './dto/publish-to-site.dto.js';
-import { Prisma } from '../../../generated/prisma/client.js';
+import {
+  Prisma,
+  ProductCharacteristic,
+  ProductCondition,
+} from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import {
   PaginatedRdo,
@@ -18,16 +23,179 @@ import { fillDto } from '../../common/utils/fillDto.js';
 import { FilesService } from '../files/files.service.js';
 import { LogsService } from '../logs/logs.service.js';
 import { LogType } from '../../../generated/prisma/client.js';
+import { Prisma__ProductClient } from '../../../generated/prisma/models.js';
 
 @Injectable()
-export class ProductsService {
+export class ProductsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly filesService: FilesService,
     private readonly logsService: LogsService,
   ) {}
 
-  private async getCategoryWithDescendants(categoryId: string): Promise<string[]> {
+  async onModuleInit() {
+    await this.migrateSlugs();
+    await this.migrateCharacteristics();
+  }
+
+  private transliterate(text: string): string {
+    const map: Record<string, string> = {
+      а: 'a',
+      б: 'b',
+      в: 'v',
+      г: 'g',
+      д: 'd',
+      е: 'e',
+      ё: 'yo',
+      ж: 'zh',
+      з: 'z',
+      и: 'i',
+      й: 'y',
+      к: 'k',
+      л: 'l',
+      м: 'm',
+      н: 'n',
+      о: 'o',
+      п: 'p',
+      р: 'r',
+      с: 's',
+      т: 't',
+      у: 'u',
+      ф: 'f',
+      х: 'h',
+      ц: 'c',
+      ч: 'ch',
+      ш: 'sh',
+      щ: 'sch',
+      ъ: '',
+      ы: 'y',
+      ь: '',
+      э: 'e',
+      ю: 'yu',
+      я: 'ya',
+    };
+    return text
+      .toLowerCase()
+      .split('')
+      .map((char) => (map[char] !== undefined ? map[char] : char))
+      .join('');
+  }
+
+  private async migrateSlugs() {
+    const products = await this.prisma.product.findMany({
+      select: { id: true, name: true, slug: true },
+    });
+
+    const productsToMigrate = products.filter((p) => !p.slug);
+    if (productsToMigrate.length === 0) return;
+
+    const existingSlugs = new Set<string>(
+      products.map((p) => p.slug).filter((s): s is string => Boolean(s)),
+    );
+    const updates: Promise<unknown>[] = [];
+
+    for (const product of productsToMigrate) {
+      const baseSlug = this.transliterate(product.name)
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+      let slug = baseSlug;
+      let counter = 1;
+
+      while (existingSlugs.has(slug)) {
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+      }
+
+      existingSlugs.add(slug);
+      updates.push(
+        this.prisma.product.update({
+          where: { id: product.id },
+          data: { slug },
+        }),
+      );
+    }
+
+    await Promise.all(updates);
+  }
+
+  private async migrateCharacteristics() {
+    const products = await this.prisma.product.findMany({
+      select: {
+        id: true,
+        standard: true,
+        length: true,
+        weight: true,
+        characteristics: { select: { title: true } },
+      },
+    });
+
+    const charsToCreate: { productId: string; title: string; value: string; }[] = [];
+
+    for (const product of products) {
+      const existingTitles = product.characteristics.map((c) => c.title);
+
+      if (product.standard && !existingTitles.includes('Стандарт')) {
+        charsToCreate.push({
+          productId: product.id,
+          title: 'Стандарт',
+          value: product.standard,
+        });
+      }
+      if (product.length && !existingTitles.includes('Длина')) {
+        charsToCreate.push({
+          productId: product.id,
+          title: 'Длина',
+          value: product.length,
+        });
+      }
+      if (product.weight && !existingTitles.includes('Вес')) {
+        charsToCreate.push({
+          productId: product.id,
+          title: 'Вес',
+          value: product.weight,
+        });
+      }
+    }
+
+    if (charsToCreate.length > 0) {
+      await this.prisma.productCharacteristic.createMany({
+        data: charsToCreate,
+      });
+    }
+  }
+
+  async generateUniqueSlug(
+    name: string,
+    excludeId?: string,
+  ): Promise<string> {
+    const baseSlug = this.transliterate(name)
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    let slug = baseSlug;
+    let counter = 1;
+
+    while (true) {
+      const existing = await this.prisma.product.findUnique({
+        where: { slug },
+        select: { id: true },
+      });
+      if (!existing || existing.id === excludeId) {
+        return slug;
+      }
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+    }
+  }
+
+  private async getCategoryWithDescendants(
+    categoryId: string,
+  ): Promise<string[]> {
     const allCategories = await this.prisma.category.findMany({
       select: { id: true, parentId: true },
     });
@@ -67,7 +235,6 @@ export class ProductsService {
         OR: [
           { name: { contains: query.search, mode: 'insensitive' } },
           { subtitle: { contains: query.search, mode: 'insensitive' } },
-          { standard: { contains: query.search, mode: 'insensitive' } },
         ],
       });
     }
@@ -101,6 +268,7 @@ export class ProductsService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
+          characteristics: true,
           _count: {
             select: {
               sites: {
@@ -159,6 +327,7 @@ export class ProductsService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
+          characteristics: true,
           _count: {
             select: {
               sites: {
@@ -194,25 +363,33 @@ export class ProductsService {
         where: { id: dto.categoryId },
       });
       if (!category) {
-        throw new NotFoundException(
-          `Категория ${dto.categoryId} не найдена`,
-        );
+        throw new NotFoundException(`Категория ${dto.categoryId} не найдена`);
       }
     }
 
     try {
+      const slug = await this.generateUniqueSlug(dto.name);
+
       const product = await this.prisma.product.create({
         data: {
           name: dto.name,
+          slug,
           subtitle: dto.subtitle,
-          standard: dto.standard,
-          length: dto.length,
-          weight: dto.weight,
           price: dto.price,
           priceUnit: dto.priceUnit,
           image: imagePath,
           quantity: dto.quantity,
+          unit: dto.unit ?? 'единица',
+          condition: dto.condition ?? ProductCondition.NEW,
           categoryId: dto.categoryId ?? null,
+          characteristics: dto.characteristics
+            ? {
+                create: dto.characteristics.map((c) => ({
+                  title: c.title,
+                  value: c.value,
+                })),
+              }
+            : undefined,
           sites: dto.siteIds?.length
             ? {
                 create: dto.siteIds.map((siteId) => ({
@@ -223,6 +400,7 @@ export class ProductsService {
             : undefined,
         },
         include: {
+          characteristics: true,
           _count: {
             select: {
               sites: {
@@ -256,6 +434,12 @@ export class ProductsService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
+        const target = (error.meta?.target as string[]) || [];
+        if (target.includes('slug')) {
+          throw new ConflictException(
+            'Произошла ошибка генерации URL-адреса (slug)',
+          );
+        }
         throw new ConflictException('Товар с таким внешним ID уже существует');
       }
       throw error;
@@ -265,7 +449,7 @@ export class ProductsService {
   async update(id: string, dto: UpdateProductDto): Promise<ProductRdo> {
     const existingProduct = await this.prisma.product.findUnique({
       where: { id },
-      select: { image: true },
+      select: { image: true, name: true, slug: true },
     });
 
     if (!existingProduct) {
@@ -286,24 +470,39 @@ export class ProductsService {
         where: { id: dto.categoryId },
       });
       if (!category) {
-        throw new NotFoundException(
-          `Категория ${dto.categoryId} не найдена`,
-        );
+        throw new NotFoundException(`Категория ${dto.categoryId} не найдена`);
       }
     }
 
-    const { siteIds, image, categoryId, ...productData } = dto;
+    const { siteIds, image, categoryId, characteristics, ...productData } = dto;
+
+    let slug = existingProduct.slug;
+    if (dto.name && dto.name !== existingProduct.name) {
+      slug = await this.generateUniqueSlug(dto.name, id);
+    }
 
     try {
       const product = await this.prisma.product.update({
         where: { id },
         data: {
           ...productData,
+          slug,
           image: imagePath,
           categoryId:
             categoryId !== undefined ? (categoryId ?? null) : undefined,
+          characteristics:
+            characteristics !== undefined
+              ? {
+                  deleteMany: {},
+                  create: characteristics.map((c) => ({
+                    title: c.title,
+                    value: c.value,
+                  })),
+                }
+              : undefined,
         },
         include: {
+          characteristics: true,
           _count: {
             select: {
               sites: {
@@ -361,10 +560,17 @@ export class ProductsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2025')
           throw new NotFoundException('Товар не найден');
-        if (error.code === 'P2002')
+        if (error.code === 'P2002') {
+          const target = (error.meta?.target as string[]) || [];
+          if (target.includes('slug')) {
+            throw new ConflictException(
+              'Произошла ошибка генерации URL-адреса (slug)',
+            );
+          }
           throw new ConflictException(
             'Товар с таким внешним ID уже существует',
           );
+        }
       }
       throw error;
     }
@@ -411,6 +617,7 @@ export class ProductsService {
     const updatedProduct = await this.prisma.product.findUnique({
       where: { id: dto.productId },
       include: {
+        characteristics: true,
         _count: {
           select: {
             sites: {
@@ -441,9 +648,9 @@ export class ProductsService {
       this.filesService.deleteFile(product.image);
     }
 
-    try {      
+    try {
       await this.prisma.product.delete({ where: { id } });
-      
+
       await this.logsService.create({
         type: LogType.warning,
         message: `Удален товар: ${product.name}`,
@@ -463,10 +670,11 @@ export class ProductsService {
     }
   }
 
-  async fetchById(id: string): Promise<ProductRdo> {
+  async fetchBySlug(slug: string): Promise<ProductRdo> {
     const product = await this.prisma.product.findUnique({
-      where: { id },
+      where: { slug },
       include: {
+        characteristics: true,
         sites: {
           where: { isPublished: true },
           select: {

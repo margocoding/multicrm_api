@@ -21,7 +21,6 @@ import {
   ApiOperation,
   ApiResponse,
   ApiParam,
-  ApiConflictResponse,
   ApiNotFoundResponse,
   ApiNoContentResponse,
   ApiConsumes,
@@ -59,7 +58,7 @@ export class ProductsController {
   }
 
   @Post('by-domain')
-  @Public() // 🟢 Публичный роут для фронтенда (SSR)
+  @Public()
   @ApiOperation({ summary: 'Получить товары по домену сайта' })
   @ApiResponse({ status: 200, type: PaginatedRdo(ProductRdo) })
   @ApiNotFoundResponse({ description: 'Сайт не найден' })
@@ -70,13 +69,14 @@ export class ProductsController {
     return this.productsService.findByDomain(domain, query);
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Получить товар по ID с опубликованными сайтами' })
-  @ApiParam({ name: 'id', type: String })
+  @Get(':slug')
+  @Public()
+  @ApiOperation({ summary: 'Получить товар по slug' })
+  @ApiParam({ name: 'slug', type: String, description: 'Slug (ЧПУ) товара' })
   @ApiResponse({ status: 200, type: ProductRdo })
   @ApiNotFoundResponse({ description: 'Товар не найден' })
-  findOne(@Param('id') id: string): Promise<ProductRdo> {
-    return this.productsService.fetchById(id);
+  findOne(@Param('slug') slug: string): Promise<ProductRdo> {
+    return this.productsService.fetchBySlug(slug);
   }
 
   @Post()
@@ -114,17 +114,16 @@ export class ProductsController {
     return this.productsService.publishToSite(dto);
   }
 
-  @Patch(':id')
+  @Patch(':idOrSlug')
   @UseInterceptors(FileInterceptor('image'))
   @ApiOperation({
-    summary:
-      'Обновить товар (данные + массовое назначение сайтов через siteIds)',
+    summary: 'Обновить товар (данные + массовое назначение сайтов)',
   })
-  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'idOrSlug', type: String, description: 'ID или Slug товара' })
   @ApiResponse({ status: 200, type: ProductRdo })
   @ApiNotFoundResponse({ description: 'Товар не найден' })
   update(
-    @Param('id') id: string,
+    @Param('idOrSlug') idOrSlug: string,
     @Body() dto: UpdateProductDto,
     @UploadedFile(
       new ParseFilePipe({
@@ -140,16 +139,16 @@ export class ProductsController {
     )
     image?: Express.Multer.File,
   ): Promise<ProductRdo> {
-    return this.productsService.update(id, { ...dto, image });
+    return this.productsService.update(idOrSlug, { ...dto, image });
   }
 
-  @Delete(':id')
+  @Delete(':idOrSlug')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Удалить товар' })
-  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'idOrSlug', type: String, description: 'ID или Slug товара' })
   @ApiNoContentResponse({ description: 'Товар удален' })
   @ApiNotFoundResponse({ description: 'Товар не найден' })
-  remove(@Param('id') id: string): Promise<void> {
-    return this.productsService.remove(id);
+  remove(@Param('idOrSlug') idOrSlug: string): Promise<void> {
+    return this.productsService.remove(idOrSlug);
   }
 }
