@@ -4,9 +4,10 @@ import { OrdersService } from './orders.service.js';
 import { PrismaModule } from '../../../prisma/prisma.module.js';
 import { LogsModule } from '../logs/logs.module.js';
 import { AuthModule } from '../auth/auth.module.js';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
-  imports: [PrismaModule, LogsModule, AuthModule],
+  imports: [PrismaModule, LogsModule, AuthModule, ConfigModule],
   controllers: [OrdersController],
   providers: [OrdersService],
 })
