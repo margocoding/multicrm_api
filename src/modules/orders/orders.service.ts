@@ -3,6 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as nodemailer from 'nodemailer';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
 import { OrderRdo } from './rdo/order.rdo.js';
@@ -16,6 +18,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly logsService: LogsService,
+    private readonly configService: ConfigService, // Добавлен ConfigService
   ) {}
 
   private normalizeCharacteristics(raw: any): { title: string; value: string }[] {
@@ -39,6 +42,71 @@ export class OrdersService {
         characteristics: this.normalizeCharacteristics(item.characteristics),
       })),
     };
+  }
+
+  // Новый приватный метод для отправки письма
+  private async sendOrderEmail(order: any) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: this.configService.get<string>('MAIL_HOST'),
+        port: this.configService.get<number>('MAIL_PORT') || 465,
+        secure: +(this.configService.get<number>('MAIL_PORT') || 465) === 465, // true для 465, false для 587
+        auth: {
+          user: this.configService.get<string>('MAIL_USER'),
+          pass: this.configService.get<string>('MAIL_PASS'),
+        },
+      });
+
+      const itemsHtml = order.items.map((item: any) => `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.name} ${item.subtitle ? `(${item.subtitle})` : ''}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.quantity} ${item.unit}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.price} ₽</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${(Number(item.quantity) * Number(item.price)).toFixed(2)} ₽</td>
+        </tr>
+      `).join('');
+
+      const html = `
+        <h2>Создан новый заказ #${order.id.slice(0, 8)}</h2>
+        <p><strong>Email клиента:</strong> ${order.email}</p>
+        <p><strong>Комментарий:</strong> ${order.comment || 'Нет'}</p>
+        <p><strong>Общая сумма:</strong> ${order.totalPrice} ${order.currency}</p>
+        
+        <h3>Состав заказа:</h3>
+        <table style="border-collapse: collapse; width: 100%; max-width: 800px;">
+          <thead>
+            <tr style="background-color: #f2f2f2;">
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Товар</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Кол-во</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Цена за ед.</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Сумма</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+      `;
+
+      await transporter.sendMail({
+        from: this.configService.get<string>('MAIL_FROM') || this.configService.get<string>('MAIL_USER'),
+        to: this.configService.get<string>('MAIL_TO'),
+        subject: `Новый заказ #${order.id.slice(0, 8)} от ${order.email}`,
+        html,
+      });
+
+      await this.logsService.create({
+        type: LogType.success,
+        message: `Email для заказа #${order.id.slice(0, 8)} успешно отправлен.`,
+      });
+    } catch (error: any) {
+      console.error('Ошибка при отправке email:', error);
+      // Используем warning, чтобы ошибка почты не прерывала создание заказа
+      await this.logsService.create({
+        type: LogType.warning,
+        message: `Не удалось отправить email для заказа #${order.id.slice(0, 8)}: ${error?.message || 'Unknown error'}`,
+      });
+    }
   }
 
   async create(dto: CreateOrderDto): Promise<OrderRdo> {
@@ -146,6 +214,9 @@ export class OrdersService {
       type: LogType.success,
       message: `Создан новый заказ #${order.id.slice(0, 8)} от ${order.email} на сумму ${order.totalPrice} ${order.currency}`,
     });
+
+    // Отправляем уведомление на почту
+    await this.sendOrderEmail(order);
 
     return fillDto(OrderRdo, this.mapOrder(order));
   }
